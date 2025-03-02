@@ -1,0 +1,55 @@
+• Lines of code (LOC) for the entire program and for individual functions &&  • Number of functions and their sizes (in LOC)  (Using Lizard)
+
+- Total nloc: 486
+
+- 4 Functions:
+
+- {next() : 84 : lines 48-132 || expr() : 147 : lines 134-282 ||  stmt() : 47 : lines 284-331 || main() : 181 : lines 333-528}
+
+• Cyclomatic complexity of each function. (Using Lizard)
+
+- {next() : 85 || expr() : 91 ||  stmt() : 15 || main() : 100}
+
+• Number of global variables and their usage. (using ctags)
+
+Global Variables (total of 14):
+
+data             variable     17 c4.c             *data; // data/bss pointer
+debug            variable     28 c4.c             debug; // print executed instructions
+e                variable     19 c4.c             int *e, *le, // current position in emitted code
+id               variable     20 c4.c             *id, // currently parsed identifier
+ival             variable     23 c4.c             ival, // current token value
+le               variable     19 c4.c             int *e, *le, // current position in emitted code
+line             variable     26 c4.c             line, // current line number
+loc              variable     25 c4.c             loc, // local variable offset
+lp               variable     16 c4.c             char *p, *lp, // current position in source code
+p                variable     16 c4.c             char *p, *lp, // current position in source code
+src              variable     27 c4.c             src, // print source and assembly flag
+sym              variable     21 c4.c             *sym, // symbol table (simple list of identifiers)
+tk               variable     22 c4.c             tk, // current token
+ty               variable     24 c4.c             ty, // current expression type
+
+The global variables in the code are used for variables that need to be accessed through multiple functions, for example flags that are used throughout the code.
+
+• Number of unique tokens and their frequency. 
+
+• Number of branches, loops, and their nesting levels.
+
+- The CNN value represents the level of branching and loops.
+- A higher CNN means the code is more complex. Higher complexity means more branches and loops.
+- The nesting level for our functions is very high, considering a CNN of 10-20 is deemed relativly complex, and anything above 51 is of high risk 
+ and unmanageable (McCabe complexity Metric) Whereas our code has a cnn of 15-100 meaning our nesting levels are very high on average.
+
+source: https://help.klocwork.com/2023/en-us/concepts/mccabecyclomaticcomplexity.htm
+
+• Memory usage patterns (e.g., stack vs. heap allocation). 
+
+- using valgrind (heap usage):
+
+- Heap memory is dynamic memory allocated by the programmer
+- 1.25 MB used from heap allocations. 
+- 6 malloc calls, 5 allocating 256KB, 1 allocating 1KB
+- the use of heap memory is high because the interpreter takes one large block then manages it instead of many smaller blocks.
+
+
+- Stack memory is used by local variables, function calls and for usage of expressions. valgrind unable to give stack memory specifics.

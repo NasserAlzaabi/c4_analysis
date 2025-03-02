@@ -1,0 +1,6 @@
+Experiment with the Code (Optional; Bonus 10%): 
+• Compile and run the C4 compiler on your local machine.
+• Modify the code to add a new feature or change an existing behavior. For example: 
+• Add support for a new operator (e.g., % for modulus). • Change the way the virtual machine handles a specific instruction. 
+• Write a short explanation of your changes and how they affect the compiler’s behavior. 
+• Save the modified code as c4_modified.c and the explanation as c4_modification_explanation.txt.
