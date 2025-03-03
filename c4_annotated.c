@@ -13,7 +13,7 @@
 #include <memory.h>
 #include <unistd.h>
 #include <fcntl.h>
-#define int long long //Forces Integers to be of long long type (64 bit)
+#define int long long //All integers will be long long (64 bit)
 
 //Global variables used for pointing in parsing and execution.
 char *p, *lp, // current position in source code
@@ -57,17 +57,17 @@ void next()
 {
   char *pp; //Temporary pointer that stores identifiers starting position
 
-  while (tk = *p) { //Read token in the code
-    ++p; //Move to the next character
-    if (tk == '\n') { //If current token is new line
-      if (src) { //If debugging then print the source code
+  while (tk = *p) {                           //Read token in the code
+    ++p;                                      //Move to the next character
+    if (tk == '\n') {                         //If current token is new line
+      if (src) {                              //If debugging then print the source code
         printf("%d: %.*s", line, p - lp, lp); //Print the current line of code
-        lp = p; //Store start of next lien of code
-        while (le < e) { //Loop over emitted code
+        lp = p;                               //Store start of next lien of code
+        while (le < e) {                      //Loop over emitted code
           printf("%8.4s", &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
                            "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
                            "OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT,"[*++le * 5]); //print instruction names
-          if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n"); //print instruction operands
+          if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n");                    //print instruction operands
         }
       }
       ++line; //increment line number

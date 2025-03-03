@@ -1,119 +1,146 @@
-// c4.c - C in four functions
+/*
+	This is a minimal C compiler that can compile its own source code.
+	It includes a tokenizer, parser, and a virtual machine (VM) for execution.
+	
+	The three core functions:
+	1. next()  - Tokenizes the input source code.
+	2. expr()  - Parses and generates code for expressions.
+	3. stmt()  - Parses and generates code for statements.
 
-// char, int, and pointer types
-// if, while, return, and expression statements
-// just enough features to allow self-compilation and a bit more
+	This design follows a **single-pass** compilation approach, where source code
+	is directly translated into executable instructions, rather than using an
+	intermediate representation.
+*/
 
-// Written by Robert Swierczek
+#include <stdio.h>   // Standard I/O functions
+#include <stdlib.h>  // Memory allocation and program exit functions
+#include <memory.h>  // Memory handling utilities
+#include <unistd.h>  // System calls (file handling, process control)
+#include <fcntl.h>   // File control options
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <unistd.h>
-#include <fcntl.h>
-#define int long long
+// Force all integer values to be 64-bit (long long).
+// This ensures compatibility across different platforms.
+#define int long long 
 
-char *p, *lp, // current position in source code
-     *data;   // data/bss pointer
+// Global pointers used for managing source code parsing and execution.
+char *p,  *lp,  // p: Pointer to the current position in source code
+               // lp: Pointer to the start of the current line in source code
+     *data;     // Points to memory where global/static data is stored
 
-int *e, *le,  // current position in emitted code
-    *id,      // currently parsed identifier
-    *sym,     // symbol table (simple list of identifiers)
-    tk,       // current token
-    ival,     // current token value
-    ty,       // current expression type
-    loc,      // local variable offset
-    line,     // current line number
-    src,      // print source and assembly flag
-    debug;    // print executed instructions
+// Pointers for emitted machine code and symbol table.
+int *e,  *le,   // e: Points to the current position in generated code
+               // le: Last emitted instruction (used for debugging)
+    *id,       // Points to the currently parsed identifier in the symbol table
+    *sym;      // Symbol table (stores identifiers, their types, and values)
 
-// tokens and classes (operators last and in precedence order)
+// Token-related variables
+int tk,        // Holds the current token being processed
+    ival,      // Holds integer values for numeric tokens
+    ty,        // Tracks the data type of an expression
+    loc,       // Tracks local variable stack offset
+    line,      // Stores the current line number (for error reporting)
+    src,       // Debugging flag to print source code while compiling
+    debug;     // Debugging flag to print executed instructions
+
+// Token types and symbol classifications
+// The order of operators in the enum ensures correct precedence in parsing.
 enum {
-  Num = 128, Fun, Sys, Glo, Loc, Id,
-  Char, Else, Enum, If, Int, Return, Sizeof, While,
-  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
+  Num = 128, // Numeric literals (integer constants)
+  Fun, Sys, Glo, Loc, Id, // Function, system call, global var, local var, identifier
+  Char, Else, Enum, If, Int, Return, Sizeof, While, // Keywords
+  Assign, Cond, Lor, Lan, Or, Xor, And, // Operators in precedence order
+  Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, // Arithmetic and bitwise ops
+  Inc, Dec, Brak // Increment, decrement, and bracket operators
 };
 
-// opcodes
-enum { LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
-       OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT };
+// Virtual Machine (VM) opcodes
+// These represent the core instructions used in generated code.
+enum { LEA, IMM, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, SI, SC, PSH, 
+       OR, XOR, AND, EQ, NE, LT, GT, LE, GE, SHL, SHR, ADD, SUB, MUL, DIV, MOD,
+       OPEN, READ, CLOS, PRTF, MALC, FREE, MSET, MCMP, EXIT };
 
-// types
+// Data types (used for variable declarations and type checking)
 enum { CHAR, INT, PTR };
 
-// identifier offsets (since we can't create an ident struct)
+// Symbol table structure
+// Since we can't use structs, identifiers are stored as arrays with fixed offsets.
 enum { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
+
+// ------------------------------------------------------------------------------------
+// The next() function (Tokenizer) is responsible for breaking the source code into tokens.
+// It scans characters from the source, identifies keywords, operators, numbers, and symbols.
+// ------------------------------------------------------------------------------------
 
 void next()
 {
-  char *pp;
+  char *pp; //Temporary pointer that stores identifiers starting position
 
-  while (tk = *p) {
-    ++p;
-    if (tk == '\n') {
-      if (src) {
-        printf("%d: %.*s", line, p - lp, lp);
-        lp = p;
-        while (le < e) {
+  while (tk = *p) { //Read token in the code
+    ++p; //Move to the next character
+    if (tk == '\n') { //If current token is new line
+      if (src) { //If debugging then print the source code
+        printf("%d: %.*s", line, p - lp, lp); //Print the current line of code
+        lp = p; //Store start of next lien of code
+        while (le < e) { //Loop over emitted code
           printf("%8.4s", &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
                            "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                           "OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT,"[*++le * 5]);
-          if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n");
+                           "OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT,"[*++le * 5]); //print instruction names
+          if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n"); //print instruction operands
         }
       }
-      ++line;
+      ++line; //increment line number
     }
-    else if (tk == '#') {
-      while (*p != 0 && *p != '\n') ++p;
+    else if (tk == '#') { //If current character is a #
+      while (*p != 0 && *p != '\n') ++p; //skip until end of line or code
     }
-    else if ((tk >= 'a' && tk <= 'z') || (tk >= 'A' && tk <= 'Z') || tk == '_') {
-      pp = p - 1;
-      while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_')
-        tk = tk * 147 + *p++;
+    else if ((tk >= 'a' && tk <= 'z') || (tk >= 'A' && tk <= 'Z') || tk == '_') { //If its alphabetic or _
+      pp = p - 1; //Store the start of identifier
+      while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_') //If its alphanumeric or _
+        tk = tk * 147 + *p++; //Generates a hash for the identifier
       tk = (tk << 6) + (p - pp);
-      id = sym;
-      while (id[Tk]) {
-        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return; }
+      id = sym; //Start symbol table tree
+      while (id[Tk]) { //Loop over symbol table
+        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return; } //If identifier exists, return the token
         id = id + Idsz;
       }
-      id[Name] = (int)pp;
-      id[Hash] = tk;
-      tk = id[Tk] = Id;
-      return;
+      id[Name] = (int)pp; //Store new identifier in symbol table
+      id[Hash] = tk; //Save the hash of identifier
+      tk = id[Tk] = Id; //Mark as an identifier
+      return; //Exit function
     }
-    else if (tk >= '0' && tk <= '9') {
-      if (ival = tk - '0') { while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0'; }
-      else if (*p == 'x' || *p == 'X') {
-        while ((tk = *++p) && ((tk >= '0' && tk <= '9') || (tk >= 'a' && tk <= 'f') || (tk >= 'A' && tk <= 'F')))
-          ival = ival * 16 + (tk & 15) + (tk >= 'A' ? 9 : 0);
+    else if (tk >= '0' && tk <= '9') { //If the token is a number
+      if (ival = tk - '0') { while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0'; } //Convert token and characters into integer values
+      else if (*p == 'x' || *p == 'X') {  //if the current character is an x or X
+        while ((tk = *++p) && ((tk >= '0' && tk <= '9') || (tk >= 'a' && tk <= 'f') || (tk >= 'A' && tk <= 'F'))) //loop over the hex values
+          ival = ival * 16 + (tk & 15) + (tk >= 'A' ? 9 : 0); //Convert hex into integers
       }
-      else { while (*p >= '0' && *p <= '7') ival = ival * 8 + *p++ - '0'; }
-      tk = Num;
-      return;
+      else { while (*p >= '0' && *p <= '7') ival = ival * 8 + *p++ - '0'; } //Convert octal into integers
+      tk = Num; //mark token as number
+      return; //exit function
     }
-    else if (tk == '/') {
-      if (*p == '/') {
-        ++p;
-        while (*p != 0 && *p != '\n') ++p;
+    else if (tk == '/') { //If token is a '/'
+      if (*p == '/') { //Check if its a comment
+        ++p; 
+        while (*p != 0 && *p != '\n') ++p; //Skip the line
       }
-      else {
-        tk = Div;
-        return;
+      else { 
+        tk = Div; //Token is division
+        return; //Exit function
       }
     }
-    else if (tk == '\'' || tk == '"') {
-      pp = data;
-      while (*p != 0 && *p != tk) {
-        if ((ival = *p++) == '\\') {
-          if ((ival = *p++) == 'n') ival = '\n';
+    else if (tk == '\'' || tk == '"') { //If token is ' or "
+      pp = data; //Store starting address for string
+      while (*p != 0 && *p != tk) { //Loop until end of quote
+        if ((ival = *p++) == '\\') { //check for a '\'
+          if ((ival = *p++) == 'n') ival = '\n'; //If next character is n, its new line
         }
-        if (tk == '"') *data++ = ival;
+        if (tk == '"') *data++ = ival; //If its a string store string in data
       }
       ++p;
-      if (tk == '"') ival = (int)pp; else tk = Num;
+      if (tk == '"') ival = (int)pp; else tk = Num; //If its a string store address, if character store as number
       return;
     }
+	//Handle operators
     else if (tk == '=') { if (*p == '=') { ++p; tk = Eq; } else tk = Assign; return; }
     else if (tk == '+') { if (*p == '+') { ++p; tk = Inc; } else tk = Add; return; }
     else if (tk == '-') { if (*p == '-') { ++p; tk = Dec; } else tk = Sub; return; }
@@ -131,106 +158,135 @@ void next()
   }
 }
 
+/*
+	expr(int lev) -- Expression Parsing function
+	Parses and generates code for expressions
+	based on precedence
+*/
 void expr(int lev)
 {
-  int t, *d;
+  int t, *d; //Temp vars, t for types, d* for jumps and branches
 
-  if (!tk) { printf("%d: unexpected eof in expression\n", line); exit(-1); }
-  else if (tk == Num) { *++e = IMM; *++e = ival; next(); ty = INT; }
-  else if (tk == '"') {
-    *++e = IMM; *++e = ival; next();
-    while (tk == '"') next();
-    data = (char *)((int)data + sizeof(int) & -sizeof(int)); ty = PTR;
+  if (!tk) { printf("%d: unexpected eof in expression\n", line); exit(-1); } //Error output when token is empty
+  else if (tk == Num) { *++e = IMM; *++e = ival; next(); ty = INT; } //If token is a number, IMM instruction with a number
+  else if (tk == '"') { //If token is string literal
+    *++e = IMM; *++e = ival; next(); //IMM instruction with string address
+    while (tk == '"') next(); //Skip repeated "
+    data = (char *)((int)data + sizeof(int) & -sizeof(int)); ty = PTR; //Align memory for storing string data
   }
-  else if (tk == Sizeof) {
-    next(); if (tk == '(') next(); else { printf("%d: open paren expected in sizeof\n", line); exit(-1); }
-    ty = INT; if (tk == Int) next(); else if (tk == Char) { next(); ty = CHAR; }
-    while (tk == Mul) { next(); ty = ty + PTR; }
-    if (tk == ')') next(); else { printf("%d: close paren expected in sizeof\n", line); exit(-1); }
-    *++e = IMM; *++e = (ty == CHAR) ? sizeof(char) : sizeof(int);
-    ty = INT;
+  // ------------------------------------------------------------------------------------
+  // HERE IS MY MODIFICATION
+
+  else if (tk == '~') { 
+    next(); 
+    expr(Inc);  // Parse the operand
+    *++e = PSH; 
+    *++e = IMM; 
+    *++e = -1;   // Load -1 onto the stack
+    *++e = XOR;  // Perform bitwise NOT (XOR with -1)
+    ty = INT;    // Result is an integer
   }
-  else if (tk == Id) {
-    d = id; next();
-    if (tk == '(') {
-      next();
-      t = 0;
-      while (tk != ')') { expr(Assign); *++e = PSH; ++t; if (tk == ',') next(); }
-      next();
-      if (d[Class] == Sys) *++e = d[Val];
-      else if (d[Class] == Fun) { *++e = JSR; *++e = d[Val]; }
-      else { printf("%d: bad function call\n", line); exit(-1); }
-      if (t) { *++e = ADJ; *++e = t; }
-      ty = d[Type];
-    }
-    else if (d[Class] == Num) { *++e = IMM; *++e = d[Val]; ty = INT; }
-    else {
-      if (d[Class] == Loc) { *++e = LEA; *++e = loc - d[Val]; }
-      else if (d[Class] == Glo) { *++e = IMM; *++e = d[Val]; }
-      else { printf("%d: undefined variable\n", line); exit(-1); }
-      *++e = ((ty = d[Type]) == CHAR) ? LC : LI;
-    }
-  }
-  else if (tk == '(') {
+  // ------------------------------------------------------------------------------------
+
+  else if (tk == Sizeof) { //If token is Sizeof
     next();
-    if (tk == Int || tk == Char) {
-      t = (tk == Int) ? INT : CHAR; next();
-      while (tk == Mul) { next(); t = t + PTR; }
-      if (tk == ')') next(); else { printf("%d: bad cast\n", line); exit(-1); }
-      expr(Inc);
-      ty = t;
-    }
-    else {
-      expr(Assign);
-      if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); }
-    }
-  }
-  else if (tk == Mul) {
-    next(); expr(Inc);
-    if (ty > INT) ty = ty - PTR; else { printf("%d: bad dereference\n", line); exit(-1); }
-    *++e = (ty == CHAR) ? LC : LI;
-  }
-  else if (tk == And) {
-    next(); expr(Inc);
-    if (*e == LC || *e == LI) --e; else { printf("%d: bad address-of\n", line); exit(-1); }
-    ty = ty + PTR;
-  }
-  else if (tk == '!') { next(); expr(Inc); *++e = PSH; *++e = IMM; *++e = 0; *++e = EQ; ty = INT; }
-  else if (tk == '~') { next(); expr(Inc); *++e = PSH; *++e = IMM; *++e = -1; *++e = XOR; ty = INT; }
-  else if (tk == Add) { next(); expr(Inc); ty = INT; }
-  else if (tk == Sub) {
-    next(); *++e = IMM;
-    if (tk == Num) { *++e = -ival; next(); } else { *++e = -1; *++e = PSH; expr(Inc); *++e = MUL; }
+	if (tk == '(') next(); //If '(' follows Sizeof, get next token
+	else { //Else print error and exit
+		printf("%d: open paren expected in sizeof\n", line);
+		exit(-1);
+	} 
     ty = INT;
+	if (tk == Int) next(); //If token is of type Int, get next token
+	else if (tk == Char) { next(); ty = CHAR; } //If token is of type Char, get next token and set ty to CHAR
+    while (tk == Mul) { next(); ty = ty + PTR; } //Handle pointer types
+    if (tk == ')') next(); //If Sizeof ends with ')', next token
+	else { printf("%d: close paren expected in sizeof\n", line); exit(-1); } //Else print error and exit
+    *++e = IMM; *++e = (ty == CHAR) ? sizeof(char) : sizeof(int); //IMM instruction with size of type
+    ty = INT; //Reset type to int
   }
-  else if (tk == Inc || tk == Dec) {
-    t = tk; next(); expr(Inc);
-    if (*e == LC) { *e = PSH; *++e = LC; }
-    else if (*e == LI) { *e = PSH; *++e = LI; }
-    else { printf("%d: bad lvalue in pre-increment\n", line); exit(-1); }
-    *++e = PSH;
-    *++e = IMM; *++e = (ty > PTR) ? sizeof(int) : sizeof(char);
-    *++e = (t == Inc) ? ADD : SUB;
-    *++e = (ty == CHAR) ? SC : SI;
+  else if (tk == Id) { //If token is an identifier
+    d = id; next(); //Store identifier info and go to next token
+    if (tk == '(') { //If its a function call
+      next();
+      t = 0; //Reset argument counter
+      while (tk != ')'){ expr(Assign); *++e = PSH; ++t; if (tk == ',') next(); } //Process function arguments
+      next(); //Go to next token
+      if (d[Class] == Sys) *++e = d[Val]; //If system function (like printf), emit the instruction
+      else if (d[Class] == Fun) { *++e = JSR; *++e = d[Val]; } //If user function, emit JSR (jump)
+      else { printf("%d: bad function call\n", line); exit(-1); } //Else print error
+      if (t) { *++e = ADJ; *++e = t; } //Adjust stack for the functions arguments
+      ty = d[Type]; //Set return type
+    }
+    else if (d[Class] == Num) { *++e = IMM; *++e = d[Val]; ty = INT; } //If identifier is a constant, emit IMM instruction
+    else { //Else its a variable
+      if (d[Class] == Loc) { *++e = LEA; *++e = loc - d[Val]; } //If local variable, emit LEA
+      else if (d[Class] == Glo) { *++e = IMM; *++e = d[Val]; } //If global variable, emit IMM
+      else { printf("%d: undefined variable\n", line); exit(-1); } //Else error 
+      *++e = ((ty = d[Type]) == CHAR) ? LC : LI; //Load variable value, char or int
+    }
   }
-  else { printf("%d: bad expression\n", line); exit(-1); }
+  else if (tk == '(') { //If token is (
+    next(); //Go to next token
+    if (tk == Int || tk == Char) { //If token is either int or char
+      t = (tk == Int) ? INT : CHAR; next(); //Store type then go to next token
+      while (tk == Mul) { next(); t = t + PTR; } //Handle the pointer typecase
+      if (tk == ')') next(); else { printf("%d: bad cast\n", line); exit(-1); } //Ensure it ends with ) else error
+      expr(Inc); //Parse the expression being typecast
+      ty = t; //Set expression type
+    }
+    else { //If not typecast, normal expression
+      expr(Assign); //Parse expression
+      if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); } //Ensure it ends with )
+    }
+  }
+  else if (tk == Mul) { //If token is *
+    next(); expr(Inc); //parse the expression after *
+    if (ty > INT) ty = ty - PTR; else { printf("%d: bad dereference\n", line); exit(-1); } //Ensures its a pointer, else error
+    *++e = (ty == CHAR) ? LC : LI; //Emit LC or LI if char or int
+  }
+  else if (tk == And) { //If token is &
+    next(); expr(Inc); //Parse expression after &
+    if (*e == LC || *e == LI) --e; else { printf("%d: bad address-of\n", line); exit(-1); } //Remove LC or LI to keep address, error if & used on non-variable
+    ty = ty + PTR; //Increment pointer
+  }
+  else if (tk == '!') { next(); expr(Inc); *++e = PSH; *++e = IMM; *++e = 0; *++e = EQ; ty = INT; } //If token !, compare value to zero
+  else if (tk == '~') { next(); expr(Inc); *++e = PSH; *++e = IMM; *++e = -1; *++e = XOR; ty = INT; } //If token ~, XOR with -1 
+  else if (tk == Add) { next(); expr(Inc); ty = INT; } //single addition, ignored, goes to next
+  else if (tk == Sub) { //If token is -
+    next(); *++e = IMM; //Emit IMM to load value
+    if (tk == Num) { *++e = -ival; next(); } else { *++e = -1; *++e = PSH; expr(Inc); *++e = MUL; } //if its number negate it
+    ty = INT; //Else, multiply by -1
+  }
+  else if (tk == Inc || tk == Dec) { //If token is Increment or Decrement
+    t = tk; next(); expr(Inc); //Parse the expression after token
+    if (*e == LC) { *e = PSH; *++e = LC; } //If its Char, load its value
+    else if (*e == LI) { *e = PSH; *++e = LI; } //If its Int, load its value
+    else { printf("%d: bad lvalue in pre-increment\n", line); exit(-1); } //Else error
+    *++e = PSH; //Push value onto stack
+    *++e = IMM; *++e = (ty > PTR) ? sizeof(int) : sizeof(char); //Load increment decrement size
+    *++e = (t == Inc) ? ADD : SUB; //Performe addition or subtration
+    *++e = (ty == CHAR) ? SC : SI; //Store the new value
+  }
+  else { printf("%d: bad expression\n", line); exit(-1); } //Else error
 
   while (tk >= lev) { // "precedence climbing" or "Top Down Operator Precedence" method
-    t = ty;
-    if (tk == Assign) {
-      next();
-      if (*e == LC || *e == LI) *e = PSH; else { printf("%d: bad lvalue in assignment\n", line); exit(-1); }
-      expr(Assign); *++e = ((ty = t) == CHAR) ? SC : SI;
+    t = ty; //Store current type in t
+    if (tk == Assign) { //if token is =
+      next(); //go to next token
+      if (*e == LC || *e == LI) *e = PSH; else { printf("%d: bad lvalue in assignment\n", line); exit(-1); } //if token is Char or Int, load its value, else error
+      expr(Assign); *++e = ((ty = t) == CHAR) ? SC : SI; //Parse right side expression
     }
-    else if (tk == Cond) {
-      next();
-      *++e = BZ; d = ++e;
-      expr(Assign);
-      if (tk == ':') next(); else { printf("%d: conditional missing colon\n", line); exit(-1); }
-      *d = (int)(e + 3); *++e = JMP; d = ++e;
-      expr(Cond);
-      *d = (int)(e + 1);
+    else if (tk == Cond) { //If token is ?
+      next(); // go to next token
+      *++e = BZ; d = ++e; //Emit branch for false case
+      expr(Assign); //Parse first expression
+      if (tk == ':') next(); else { printf("%d: conditional missing colon\n", line); exit(-1); } //If : follows the true expression, else error
+      *d = (int)(e + 3); *++e = JMP; d = ++e; //Emit jump to skip false branch
+      expr(Cond); //Parse second expression
+      *d = (int)(e + 1); //Set jump to false branch
     }
+
+	//Handle operations
     else if (tk == Lor) { next(); *++e = BNZ; d = ++e; expr(Lan); *d = (int)(e + 1); ty = INT; }
     else if (tk == Lan) { next(); *++e = BZ;  d = ++e; expr(Or);  *d = (int)(e + 1); ty = INT; }
     else if (tk == Or)  { next(); *++e = PSH; expr(Xor); *++e = OR;  ty = INT; }
@@ -281,52 +337,56 @@ void expr(int lev)
   }
 }
 
+/*
+	stmt() -- Parse statements
+	Parses and generates code for the statements
+*/
 void stmt()
 {
-  int *a, *b;
+  int *a, *b; //Temporary pointer for branches
 
-  if (tk == If) {
-    next();
-    if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
-    expr(Assign);
-    if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); }
-    *++e = BZ; b = ++e;
-    stmt();
-    if (tk == Else) {
-      *b = (int)(e + 3); *++e = JMP; b = ++e;
-      next();
-      stmt();
+  if (tk == If) { //If token is if statement
+    next(); //Go to next token
+    if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); } //Ensure starts with (
+    expr(Assign); //Evaluate Condition
+    if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); } //Ensure ends with )
+    *++e = BZ; b = ++e; //Emit branch instruction if false
+    stmt(); //Parse if body
+    if (tk == Else) { //Handle else
+      *b = (int)(e + 3); *++e = JMP; b = ++e; //Patch if branch and jump to else
+      next(); //Get next token
+      stmt(); //Parse else body
     }
-    *b = (int)(e + 1);
+    *b = (int)(e + 1); //Patch the jump target
   }
-  else if (tk == While) {
-    next();
-    a = e + 1;
-    if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
+  else if (tk == While) { //If token is while
+    next(); //Go to next token
+    a = e + 1; //Store loop starting address
+    if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); } //Ensure starts with (
+    expr(Assign); //Check loop condition
+    if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); } //Ensure ends with )
+    *++e = BZ; b = ++e; //Emit branch if conditioon is false
+    stmt(); //Parse loop body
+    *++e = JMP; *++e = (int)a; //Emit jump back to the start of loop
+    *b = (int)(e + 1); //Patch exit jump
+  }
+  else if (tk == Return) { //If token is return
+    next(); //Go to next token
+    if (tk != ';') expr(Assign); //Evaluate return expression
+    *++e = LEV; //Emit return instruction
+    if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); } //Ensure ; at end
+  }
+  else if (tk == '{') { //if toke {
+    next(); //Go to next token
+    while (tk != '}') stmt(); // loop until } and parse inside statements
+    next(); //Go to next token
+  }
+  else if (tk == ';') { //if token is ;
+    next(); //Go to next token
+  }
+  else { //If expression
     expr(Assign);
-    if (tk == ')') next(); else { printf("%d: close paren expected\n", line); exit(-1); }
-    *++e = BZ; b = ++e;
-    stmt();
-    *++e = JMP; *++e = (int)a;
-    *b = (int)(e + 1);
-  }
-  else if (tk == Return) {
-    next();
-    if (tk != ';') expr(Assign);
-    *++e = LEV;
-    if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
-  }
-  else if (tk == '{') {
-    next();
-    while (tk != '}') stmt();
-    next();
-  }
-  else if (tk == ';') {
-    next();
-  }
-  else {
-    expr(Assign);
-    if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
+    if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }//Ensure ; at end
   }
 }
 
@@ -336,23 +396,26 @@ int main(int argc, char **argv)
   int *pc, *sp, *bp, a, cycle; // vm registers
   int i, *t; // temps
 
-  --argc; ++argv;
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') { debug = 1; --argc; ++argv; }
-  if (argc < 1) { printf("usage: c4 [-s] [-d] file ...\n"); return -1; }
+  --argc; ++argv; //Skip program name
+  if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; } //Enable source debugging
+  if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') { debug = 1; --argc; ++argv; } //Enable execution debugging
+  if (argc < 1) { printf("usage: c4 [-s] [-d] file ...\n"); return -1; } //Print usage if no input file
 
-  if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; }
+  if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; } //Open source file
 
   poolsz = 256*1024; // arbitrary size
+  //Allocate symbol, text, data, and stack
   if (!(sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; }
   if (!(le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
   if (!(data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
   if (!(sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }
 
+  //Initialize symbol, text, data to 0
   memset(sym,  0, poolsz);
   memset(e,    0, poolsz);
   memset(data, 0, poolsz);
 
+  //Define keywords and standard library functions
   p = "char else enum if int return sizeof while "
       "open read close printf malloc free memset memcmp exit void main";
   i = Char; while (i <= While) { next(); id[Tk] = i++; } // add keywords to symbol table
@@ -360,10 +423,10 @@ int main(int argc, char **argv)
   next(); id[Tk] = Char; // handle void type
   next(); idmain = id; // keep track of main
 
-  if (!(lp = p = malloc(poolsz))) { printf("could not malloc(%d) source area\n", poolsz); return -1; }
-  if ((i = read(fd, p, poolsz-1)) <= 0) { printf("read() returned %d\n", i); return -1; }
-  p[i] = 0;
-  close(fd);
+  if (!(lp = p = malloc(poolsz))) { printf("could not malloc(%d) source area\n", poolsz); return -1; } //Allocate source buffer
+  if ((i = read(fd, p, poolsz-1)) <= 0) { printf("read() returned %d\n", i); return -1; } //Read source file into memory
+  p[i] = 0; //Null terminate source code
+  close(fd); //Close source file
 
   // parse declarations
   line = 1;
@@ -372,13 +435,13 @@ int main(int argc, char **argv)
     bt = INT; // basetype
     if (tk == Int) next();
     else if (tk == Char) { next(); bt = CHAR; }
-    else if (tk == Enum) {
+    else if (tk == Enum) { //Handle enum definitions
       next();
       if (tk != '{') next();
       if (tk == '{') {
         next();
         i = 0;
-        while (tk != '}') {
+        while (tk != '}') { //Process enum values
           if (tk != Id) { printf("%d: bad enum identifier %d\n", line, tk); return -1; }
           next();
           if (tk == Assign) {
@@ -393,18 +456,18 @@ int main(int argc, char **argv)
         next();
       }
     }
-    while (tk != ';' && tk != '}') {
+    while (tk != ';' && tk != '}') { //Handle the global variables or functions
       ty = bt;
-      while (tk == Mul) { next(); ty = ty + PTR; }
+      while (tk == Mul) { next(); ty = ty + PTR; } //handle pointer types
       if (tk != Id) { printf("%d: bad global declaration\n", line); return -1; }
       if (id[Class]) { printf("%d: duplicate global definition\n", line); return -1; }
       next();
       id[Type] = ty;
-      if (tk == '(') { // function
+      if (tk == '(') { //Function declaration
         id[Class] = Fun;
         id[Val] = (int)(e + 1);
         next(); i = 0;
-        while (tk != ')') {
+        while (tk != ')') { //Parse function parameters
           ty = INT;
           if (tk == Int) next();
           else if (tk == Char) { next(); ty = CHAR; }
@@ -421,7 +484,7 @@ int main(int argc, char **argv)
         if (tk != '{') { printf("%d: bad function definition\n", line); return -1; }
         loc = ++i;
         next();
-        while (tk == Int || tk == Char) {
+        while (tk == Int || tk == Char) { //Parse local variables
           bt = (tk == Int) ? INT : CHAR;
           next();
           while (tk != ';') {
@@ -437,9 +500,9 @@ int main(int argc, char **argv)
           }
           next();
         }
-        *++e = ENT; *++e = i - loc;
-        while (tk != '}') stmt();
-        *++e = LEV;
+        *++e = ENT; *++e = i - loc; //Enit function prologue
+        while (tk != '}') stmt(); //Parse function body
+        *++e = LEV; //Emit function epilogue
         id = sym; // unwind symbol table locals
         while (id[Tk]) {
           if (id[Class] == Loc) {
@@ -450,7 +513,7 @@ int main(int argc, char **argv)
           id = id + Idsz;
         }
       }
-      else {
+      else { //Global variable declaration
         id[Class] = Glo;
         id[Val] = (int)data;
         data = data + sizeof(int);
@@ -461,7 +524,7 @@ int main(int argc, char **argv)
   }
 
   if (!(pc = (int *)idmain[Val])) { printf("main() not defined\n"); return -1; }
-  if (src) return 0;
+  if (src) return 0; //If source debugging, exit before execution
 
   // setup stack
   bp = sp = (int *)((int)sp + poolsz);
@@ -471,11 +534,11 @@ int main(int argc, char **argv)
   *--sp = (int)argv;
   *--sp = (int)t;
 
-  // run...
+  //Run compiled program
   cycle = 0;
   while (1) {
     i = *pc++; ++cycle;
-    if (debug) {
+    if (debug) { //Print debug info
       printf("%d> %.4s", cycle,
         &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
          "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"

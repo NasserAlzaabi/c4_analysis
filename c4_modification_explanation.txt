@@ -4,3 +4,42 @@ Experiment with the Code (Optional; Bonus 10%):
 • Add support for a new operator (e.g., % for modulus). • Change the way the virtual machine handles a specific instruction. 
 • Write a short explanation of your changes and how they affect the compiler’s behavior. 
 • Save the modified code as c4_modified.c and the explanation as c4_modification_explanation.txt.
+
+
+Modification: Adding Support for the Bitwise NOT Operator (~)
+Change Description:
+The original C4 compiler does not support the bitwise NOT (~) operator in expressions. This modification adds support for ~ to complement bits, just as it does in standard C.
+
+Changes in the Code:
+Modify the expr() function to recognize ~ and generate the correct bytecode.
+Insert a case for ~ in expr() before handling binary operators.
+Generate a XOR -1 instruction to implement the bitwise NOT operation.
+Modified Code (in expr() function):
+Find the section handling unary operators in expr() and modify it as follows:
+
+
+else if (tk == '~') { 
+  next(); 
+  expr(Inc);  // Parse the operand
+  *++e = PSH; 
+  *++e = IMM; 
+  *++e = -1;   // Load -1 onto the stack
+  *++e = XOR;  // Perform bitwise NOT (XOR with -1)
+  ty = INT;    // Result is an integer
+}
+How This Change Affects the Compiler’s Behavior:
+Before the Change:
+Writing ~x; in C4 source code would cause a syntax error since ~ was not recognized.
+After the Change:
+C4 correctly parses and executes ~x by applying bitwise NOT.
+It generates VM instructions equivalent to x ^ -1, which flips all bits.
+Example Usage in C4 Source Code
+
+
+
+int main() {
+  int a;
+  a = 5;
+  printf("%d", ~a);  // Should print -6 because ~5 == -6 in two’s complement
+  return 0;
+}
