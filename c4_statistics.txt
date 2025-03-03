@@ -33,6 +33,46 @@ The global variables in the code are used for variables that need to be accessed
 
 • Number of unique tokens and their frequency. 
 
+Tokens  ||  occurrences
+
+Num     ||  8
+Fun     ||  3 
+Sys     ||  3 
+Glo     ||  3 
+Loc     ||  7 
+Id      ||  10 
+Char    ||  8 
+Else    ||  2 
+Enum    ||  2 
+If      ||  2 
+Int     ||  8 
+Return  ||  2 
+Sizeof  ||  2 
+While   ||  3 
+Assign  ||  13 
+Cond    ||  4 
+Lor     ||  3 
+Lan     ||  4 
+Or      ||  4 
+Xor     ||  4 
+And     ||  5 
+Eq      ||  4 
+Ne      ||  3 
+Lt      ||  5 
+Gt      ||  3 
+Le      ||  3 
+Ge      ||  3 
+Shl     ||  7 
+Shr     ||  3 
+Add     ||  6 
+Sub     ||  4 
+Mul     ||  11 
+Div     ||  3 
+Mod     ||  3 
+Inc     ||  18 
+Dec     ||  4 
+Brak    ||  3 
+
 • Number of branches, loops, and their nesting levels.
 
 - The CNN value represents the level of branching and loops.
@@ -51,5 +91,14 @@ source: https://help.klocwork.com/2023/en-us/concepts/mccabecyclomaticcomplexity
 - 6 malloc calls, 5 allocating 256KB, 1 allocating 1KB
 - the use of heap memory is high because the interpreter takes one large block then manages it instead of many smaller blocks.
 
+-Leaks:
+==428== LEAK SUMMARY:
+==428==    definitely lost: 262,144 bytes in 1 blocks
+==428==    indirectly lost: 0 bytes in 0 blocks
+==428==      possibly lost: 0 bytes in 0 blocks
+==428==    still reachable: 1,048,576 bytes in 4 blocks
+==428==         suppressed: 0 bytes in 0 blocks
+
+Variables in the code were not free'd properly after usage resulting in leaks for most allocated variables (used test cases can be seen in the input.c file)
 
 - Stack memory is used by local variables, function calls and for usage of expressions. valgrind unable to give stack memory specifics.
